@@ -26,6 +26,11 @@ Usage: <mode: source/dest> <server_ip> <fake_server_port/dest_port/real_server_p
   ./client dest 164.68.125.80 19132 heldendesbildschirms nopassword udp 164.68.125.80 8888
   ```
 
+- Server:
+  ```
+  ./server 8888
+  ```
+
 #### **Funktionsweise:**
 
 - **UDP für Hole-Punching**: UDP wird verwendet, um eine direkte Verbindung zwischen zwei Endpunkten über ein Peer-to-Peer-Netzwerk zu etablieren. Dies geschieht durch das Hole-Punching-Verfahren, bei dem UDP-Nachrichten zwischen den Peers ausgetauscht werden, um NATs (Network Address Translators) zu umgehen.
@@ -68,6 +73,11 @@ Usage: <mode: source/dest> <server_ip> <fake_server_port/dest_port/real_server_p
 - Destination client:
   ```
   ./client dest 164.68.125.80 19132 heldendesbildschirms nopassword udp 164.68.125.80 8888
+  ```
+
+- Server:
+  ```
+  ./server 8888
   ```
 
 #### **How It Works:**
