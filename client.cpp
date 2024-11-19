@@ -15,6 +15,9 @@ using boost::asio::ip::udp;
 int sock = socket(AF_INET, SOCK_DGRAM, 0);
 struct sockaddr_in dest_addr;
 
+#define MAX_PACKET_SIZE 1024
+#define MAX_UDP_SIZE 1024
+
 void receiveMessages(int sockfd)
 {
     char buffer[1024];
@@ -202,9 +205,127 @@ void connect_to_p2p_server(const std::string &server_ip, int server_port, const 
     // close(sock); // Schließe die Verbindung, wenn alles erledigt ist
 }
 
-#define MAX_PACKET_SIZE 1024
-#define MAX_UDP_SIZE 1024
+/*
+void connect_to_p2p_server(const std::string &server_ip, int server_port, const std::string &network_id, const std::string &network_password, const std::string &mode)
+{
+    // Socket erstellen
+    boost::asio::io_context io_context;
+    udp::socket socket(io_context, udp::endpoint(udp::v4(), 0));
+    socket.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
+    socket.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
 
+    std::array<char, MAX_PACKET_SIZE> recv_buf;
+    udp::endpoint server_endpoint(boost::asio::ip::address::from_string(server_ip), server_port);
+    boost::system::error_code error;
+
+    // inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
+    char recv_P2P_buf[MAX_PACKET_SIZE] = {0};
+
+    if (mode == "source")
+    {
+        std::string connect_data = "CONNECT:" + network_id + ":" + network_password;
+        socket.send_to(boost::asio::buffer(connect_data), server_endpoint, 0, error);
+    }
+    else if (mode == "dest")
+    {
+        // Netzwerk-ID und Passwort als Registrierung senden
+        std::string auth_data = "REGISTER:" + network_id + ":" + network_password;
+        socket.send_to(boost::asio::buffer(auth_data), server_endpoint, 0, error);
+    }
+
+    std::cout << "Warte auf Antwort vom Server...\n";
+
+    // Warten auf Antwort des Servers (Verbindungsinformationen des Zielclients)
+    char buffer[1024];
+    struct sockaddr_in from_addr;
+    socklen_t from_len = sizeof(from_addr);
+    ssize_t n = socket.receive_from(boost::asio::buffer(buffer), server_endpoint, 0, error);
+
+    buffer[n] = '\0'; // Nullterminierung der empfangenen Nachricht
+    std::cout << "Verbindungsdaten vom P2P-Server erhalten: " << buffer << std::endl;
+
+    // Parsing der empfangenen Verbindungsdaten des Zielclients
+    std::string received_data(buffer);
+    size_t pos = received_data.find(":");
+    if (pos == std::string::npos)
+    {
+        std::cerr << "Fehlerhafte Antwort vom Server." << std::endl;
+        close(sock);
+        exit(EXIT_FAILURE);
+    }
+
+    // Schritt 1: Entferne "CLIENT:" oder passe das Parsing entsprechend an
+    size_t prefix_pos = received_data.find(":");
+    if (prefix_pos != std::string::npos)
+    {
+        received_data = received_data.substr(prefix_pos + 1); // Entferne den Präfix bis zum ersten ":"
+    }
+
+    // Schritt 2: Teile die IP-Adresse und den Port auf
+    size_t colon_pos = received_data.find(":");
+    if (colon_pos == std::string::npos)
+    {
+        std::cerr << "Fehlerhafte Antwort vom Server: Kein Port gefunden." << std::endl;
+        close(sock);
+        exit(EXIT_FAILURE);
+    }
+
+    std::string dest_ip = received_data.substr(0, colon_pos);
+    int dest_port = std::stoi(received_data.substr(colon_pos + 1));
+
+    // Jetzt eine direkte Verbindung zum Zielclient herstellen
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(dest_port);
+
+    // Hole-Punching: An den Zielclient senden, unabhängig von der Erfolgsprüfung
+
+    std::cout << "Jetzt eine direkte Verbindung zum Zielclient herstellen. " << dest_ip << ":" << dest_port << std::endl;
+
+    std::string punch_message = "PING";
+    sendto(sock, punch_message.c_str(), punch_message.size(), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    udp::endpoint remote_endpoint(boost::asio::ip::address::from_string(dest_ip), dest_port);
+    socket.send_to(boost::asio::buffer(punch_message), remote_endpoint, 0, error);
+
+    // Danach warten wir auf eine Antwort
+    socklen_t addr_len = sizeof(dest_addr);
+    int bytes_received = socket.receive_from(boost::asio::buffer(buffer), remote_endpoint, 0, error);
+    if (bytes_received > 0)
+    {
+        buffer[bytes_received] = '\0'; // Null-terminieren
+        std::cout << "Antwort vom Peer erhalten: " << buffer << std::endl;
+    }
+    else
+    {
+        perror("Fehler beim Empfangen der Antwort");
+    }
+
+    std::cout << "Verbindung zum Zielclient hergestellt.\n";
+    // return;
+
+    // Starte Thread für Empfang
+    // std::thread receiveThread(receiveMessages, sock);
+
+    // Jetzt warten, um auf Daten zu warten und die Kommunikation fortzusetzen
+    while (true)
+    {
+        // Beispiel für das Senden von Nachrichten:
+        char message[65000];
+        std::cout << "Geben Sie eine Nachricht ein: ";
+        std::cin.getline(message, sizeof(message));
+
+        // Nachricht an den anderen Client senden
+        punch_message = message;
+        socket.send_to(boost::asio::buffer(punch_message), remote_endpoint, 0, error);
+
+        int bytes_received = socket.receive_from(boost::asio::buffer(message), remote_endpoint, 0, error);
+        if (bytes_received > 0)
+        {
+            std::cout << "Antwort vom Zielclient: " << message << std::endl;
+        }
+    }
+}
+*/
 void fragmentAndSend(int sockfd, struct sockaddr_in &dest_addr, const char *data, size_t data_size)
 {
     size_t offset = 0;
@@ -249,13 +370,15 @@ int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
     size_t total_received_data = 0;
     bool receiving = true;
 
-    while (receiving)
-    {
-        ssize_t received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
+    ssize_t received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
 
-        if (received_len > 0)
+    if (received_len > 0)
+    {
+        while (receiving)
         {
-            // Extrahiere Fragment-ID und End-Flag aus dem Header (erste 3 Bytes)
+            // if (received_len > 0)
+            //{
+            //  Extrahiere Fragment-ID und End-Flag aus dem Header (erste 3 Bytes)
             int fragment_id = buffer[0] | (buffer[1] << 8);
             bool is_last_fragment = buffer[2] == 1;
 
@@ -278,21 +401,24 @@ int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
             {
                 receiving = false;
             }
+            //}
+            // received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
         }
+
+        // Rekonstruiere die vollständigen Daten aus den Fragmenten
+        std::vector<char> complete_data;
+        for (int i = 0; i < fragments.size(); ++i)
+        {
+            complete_data.insert(complete_data.end(), fragments[i].begin(), fragments[i].end());
+        }
+
+        // Kopiere die rekonstruierten Daten in den bereitgestellten Puffer
+        size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
+        std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
+
+        return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
     }
-
-    // Rekonstruiere die vollständigen Daten aus den Fragmenten
-    std::vector<char> complete_data;
-    for (int i = 0; i < fragments.size(); ++i)
-    {
-        complete_data.insert(complete_data.end(), fragments[i].begin(), fragments[i].end());
-    }
-
-    // Kopiere die rekonstruierten Daten in den bereitgestellten Puffer
-    size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
-    std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
-
-    return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
+    return 0;
 }
 
 /*
@@ -435,7 +561,7 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
 
     socket.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
     socket.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
-
+    socket.non_blocking(true);
     int rcvbuf_size = MAX_PACKET_SIZE; // Puffergröße in Bytes
 
     if (setsockopt(sock, SOL_SOCKET, SO_RCVBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
@@ -450,6 +576,18 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
         perror("Fehler beim Setzen der Empfangspuffergröße");
         close(sock);
         return;
+    }
+
+    // Make the socket non-blocking using fcntl
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0)
+    {
+        std::cerr << "Failed to get socket flags\n";
+    }
+
+    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+        std::cerr << "Failed to set O_NONBLOCK\n";
     }
 
     /*
@@ -531,6 +669,8 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
 
     socket.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
     socket.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
+    socket.non_blocking(true);
+
     int rcvbuf_size = MAX_PACKET_SIZE; // Puffergröße in Bytes
 
     if (setsockopt(sock, SOL_SOCKET, SO_RCVBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
@@ -545,6 +685,18 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
         perror("Fehler beim Setzen der Empfangspuffergröße");
         close(sock);
         return;
+    }
+
+    // Make the socket non-blocking using fcntl
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0)
+    {
+        std::cerr << "Failed to get socket flags\n";
+    }
+
+    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+        std::cerr << "Failed to set O_NONBLOCK\n";
     }
 
     /*
@@ -582,7 +734,6 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
 
     while (true)
     {
-
         // int receivedBytes = recvfrom(sock, recv_P2P_buf, sizeof(recv_P2P_buf), 0, nullptr, nullptr);
         int receivedBytes = receiveAndReconstruct(sock, recv_P2P_buf, sizeof(recv_P2P_buf));
         if (receivedBytes > 0)
