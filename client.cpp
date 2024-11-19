@@ -219,16 +219,18 @@ void fragmentAndSend(int sockfd, struct sockaddr_in &dest_addr, const char *data
         char fragment[MAX_UDP_SIZE];
         std::memcpy(fragment, data + offset, fragment_size);
 
-        // Header für Fragment ID und mehr Information hinzufügen (optional)
-        char header[4];
-        header[0] = fragment_id & 0xFF;                       // Fragment-ID (1 Byte)
-        header[1] = (fragment_id >> 8) & 0xFF;                // Fragment-ID (weiteres Byte)
-        header[2] = (remaining_data <= MAX_UDP_SIZE) ? 1 : 0; // End-Flag, wenn das letzte Fragment
-        header[3] = 0;                                        // Kann für die Sequenznummer oder weiteres verwendet werden
+        // Header für Fragment ID und weitere Informationen hinzufügen
+        char packet[MAX_UDP_SIZE + 4];
+        packet[0] = fragment_id & 0xFF;                       // Fragment-ID (1 Byte)
+        packet[1] = (fragment_id >> 8) & 0xFF;                // Fragment-ID (weiteres Byte)
+        packet[2] = (remaining_data <= MAX_UDP_SIZE) ? 1 : 0; // End-Flag, wenn das letzte Fragment
+        packet[3] = 0;                                        // Reservierter Byte für zukünftige Zwecke
+
+        // Daten in das Packet kopieren
+        std::memcpy(packet + 4, fragment, fragment_size);
 
         // Fragment senden
-        sendto(sockfd, header, sizeof(header), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        sendto(sockfd, fragment, fragment_size, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        sendto(sockfd, packet, fragment_size + 4, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
         // Offset anpassen und Fragment-ID erhöhen
         offset += fragment_size;
@@ -236,13 +238,72 @@ void fragmentAndSend(int sockfd, struct sockaddr_in &dest_addr, const char *data
     }
 }
 
-void receiveAndReconstruct(int sockfd)
+const int MAX_ATTEMPTS = 8; // Maximale Anzahl an Empfängen ohne neues Fragment
+
+int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
 {
-    char buffer[MAX_UDP_SIZE];
+    std::unordered_map<int, std::vector<char>> fragments; // Speichert empfangene Fragmente
+    char buffer[MAX_UDP_SIZE + 4];                        // Puffer für empfangene Daten (inklusive Header)
     struct sockaddr_in from_addr;
     socklen_t addr_len = sizeof(from_addr);
-    int current_fragment_id = 0;
+    size_t total_received_data = 0;
+    bool receiving = true;
+
+    while (receiving)
+    {
+        ssize_t received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
+
+        if (received_len > 0)
+        {
+            // Extrahiere Fragment-ID und End-Flag aus dem Header (erste 3 Bytes)
+            int fragment_id = buffer[0] | (buffer[1] << 8);
+            bool is_last_fragment = buffer[2] == 1;
+
+            // Falls ein neues Datenpaket mit Fragment-ID 0 empfangen wird, starte neu
+            if (fragment_id == 0 && !fragments.empty())
+            {
+                // Daten neu anfangen zu empfangen
+                fragments.clear();
+                total_received_data = 0;
+                std::cout << "Neues Datenpaket empfangen, bestehende Fragmente verworfen." << std::endl;
+            }
+
+            // Extrahiere die Daten des Fragments
+            size_t data_len = received_len - 4; // 4 Bytes für den Header
+            fragments[fragment_id] = std::vector<char>(buffer + 4, buffer + 4 + data_len);
+            total_received_data += data_len;
+
+            // Beenden, wenn das letzte Fragment empfangen wurde
+            if (is_last_fragment)
+            {
+                receiving = false;
+            }
+        }
+    }
+
+    // Rekonstruiere die vollständigen Daten aus den Fragmenten
+    std::vector<char> complete_data;
+    for (int i = 0; i < fragments.size(); ++i)
+    {
+        complete_data.insert(complete_data.end(), fragments[i].begin(), fragments[i].end());
+    }
+
+    // Kopiere die rekonstruierten Daten in den bereitgestellten Puffer
+    size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
+    std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
+
+    return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
+}
+
+/*
+int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
+{
+    std::unordered_map<int, std::vector<char>> fragment_map;
+    char buffer[MAX_UDP_SIZE + 4];
+    struct sockaddr_in from_addr;
+    socklen_t addr_len = sizeof(from_addr);
     bool received_all_fragments = false;
+    size_t total_received_data = 0;
 
     while (!received_all_fragments)
     {
@@ -250,29 +311,112 @@ void receiveAndReconstruct(int sockfd)
 
         if (received_len > 0)
         {
-            // Erstellt Fragment-ID aus Header
+            // Extrahiere Fragment-ID aus dem Header (2 Bytes)
             int fragment_id = buffer[0] | (buffer[1] << 8);
 
-            // Überprüfen, ob das Fragment das letzte ist
+            // Überprüfen, ob es das letzte Fragment ist (1 Byte)
             bool is_last_fragment = buffer[2] == 1;
 
-            // Datenfragment
-            char *data = buffer + 4; // Header-Datenüberspringen
+            // Extrahiere das eigentliche Datenfragment
+            size_t data_len = received_len - 4; // 4 Bytes für den Header
+            std::vector<char> data(buffer + 4, buffer + 4 + data_len);
 
-            // Hier kannst du die Daten weiterverarbeiten oder speichern
+            // Fragment speichern
+            fragment_map[fragment_id] = data;
+            total_received_data += data_len;
 
-            std::cout << "Fragment #" << fragment_id << " erhalten" << std::endl;
-
-            // Wenn es das letzte Fragment ist, beende die Rekonstruktion
+            // Wenn es das letzte Fragment ist, brechen wir die Schleife
             if (is_last_fragment)
             {
                 received_all_fragments = true;
-                std::cout << "Alle Fragmente empfangen, Rekonstruktion abgeschlossen." << std::endl;
             }
         }
     }
-}
 
+    // Rekonstruiere die vollständigen Daten
+    std::vector<char> complete_data;
+    for (int i = 0; i < fragment_map.size(); i++)
+    {
+        complete_data.insert(complete_data.end(), fragment_map[i].begin(), fragment_map[i].end());
+    }
+
+    // Kopiere die rekonstruierten Daten in den bereitgestellten Puffer
+    size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
+    std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
+
+    return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
+}
+*/
+
+/*
+int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
+{
+    std::vector<std::vector<char>> fragments; // Speichert Fragmente in der richtigen Reihenfolge
+    char buffer[MAX_UDP_SIZE + 4];           // Puffer für empfangene Daten (inklusive Header)
+    struct sockaddr_in from_addr;
+    socklen_t addr_len = sizeof(from_addr);
+    size_t total_received_data = 0;
+    int attempts = 0;
+
+    auto start_time = std::chrono::steady_clock::now();
+
+    while (attempts < MAX_ATTEMPTS)
+    {
+        ssize_t received_len = recvfrom(sockfd, buffer, sizeof(buffer), MSG_DONTWAIT, (struct sockaddr *)&from_addr, &addr_len);
+
+        if (received_len > 0)
+        {
+            // Extrahiere Fragment-ID und End-Flag aus dem Header (erste 3 Bytes)
+            int fragment_id = buffer[0] | (buffer[1] << 8);
+            bool is_last_fragment = buffer[2] == 1;
+
+            // Extrahiere Daten des Fragments
+            size_t data_len = received_len - 4; // 4 Bytes für den Header
+            if (fragment_id >= fragments.size())
+            {
+                fragments.resize(fragment_id + 1);
+            }
+            fragments[fragment_id] = std::vector<char>(buffer + 4, buffer + 4 + data_len);
+            total_received_data += data_len;
+
+            // Setze den Versuchszähler zurück, da wir ein neues Fragment empfangen haben
+            attempts = 0;
+
+            // Beenden, wenn das letzte Fragment empfangen wurde
+            if (is_last_fragment)
+            {
+                break;
+            }
+        }
+        else
+        {
+            // Erhöhe den Versuchszähler, wenn kein Fragment empfangen wurde
+            attempts++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50)); // Kurze Pause, um CPU-Auslastung zu minimieren
+        }
+
+        // Optional: Breche ab, wenn zu viel Zeit vergangen ist
+        auto current_time = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count() > 5)
+        {
+            break; // Timeout nach 5 Sekunden
+        }
+    }
+
+    // Rekonstruiere die vollständigen Daten aus den Fragmenten
+    std::vector<char> complete_data;
+    for (const auto &fragment : fragments)
+    {
+        complete_data.insert(complete_data.end(), fragment.begin(), fragment.end());
+    }
+
+    // Kopiere die rekonstruierten Daten in den bereitgestellten Puffer
+    size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
+    std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
+
+    return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
+}
+*/
 void start_source_client(const std::string &fake_server_ip, unsigned short port, const std::string &network_id, const std::string &network_password, std::string &protocol)
 {
     boost::asio::io_context io_context;
@@ -308,13 +452,18 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
         return;
     }
 
-    /*int mtu = 1500; // Typische MTU für Ethernet-Verbindungen
+    /*
+    int mtu = MAX_PACKET_SIZE; // Typische MTU für Ethernet-Verbindungen
     if (setsockopt(sock, IPPROTO_IP, IP_MTU_DISCOVER, &mtu, sizeof(mtu)) < 0)
     {
         perror("Fehler beim Setzen der MTU-Entdeckung");
         close(sock);
         return;
-    }*/
+    }
+    */
+    // int val = IP_PMTUDISC_DO;
+    // int val = IP_PMTUDISC_DONT;
+    // setsockopt(sock, IPPROTO_IP, IP_MTU_DISCOVER, &val, sizeof(val));
 
     std::cout << "Source client gestartet. Fake Server IP: " << fake_server_ip << " Port: " << port << "\n";
     std::cout << "Verbinden mit P2P-Netzwerk mit ID: " << network_id << " und Passwort: " << network_password << "\n";
@@ -330,21 +479,22 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
 
         if (!error && len > 0 && dest_addr.sin_addr.s_addr != 0 && dest_addr.sin_port != 0)
         {
-            std::cout << "Paket empfangen von: " << remote_endpoint << " Größe: " << len << "\n";
+            // std::cout << "Paket empfangen von: " << remote_endpoint << " Größe: " << len << "\n";
             std::string data(recv_buf.data(), len);
-            std::cout << "Daten: " << data << std::endl;
+            // std::cout << "Daten: " << data << std::endl;
 
             // Paketweiterleitungslogik
 
-            // fragmentAndSend(sock, dest_addr, recv_buf.data(), len);
+            fragmentAndSend(sock, dest_addr, recv_buf.data(), len);
 
-            ssize_t sent = sendto(sock, recv_buf.data(), len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            /*ssize_t sent = sendto(sock, recv_buf.data(), len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             if (sent < 0)
             {
                 perror("Nachricht senden fehlgeschlagen");
                 close(sock);
                 exit(EXIT_FAILURE);
-            }
+            }*/
+
             // udp::socket sockettest(io_context, udp::endpoint(udp::v4(), 0));
             // sockettest.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
             // sockettest.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
@@ -353,12 +503,13 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
             // sockettest.send_to(boost::asio::buffer(recv_buf), test_endpoint, 0, error);
         }
 
-        int receivedBytes = recvfrom(sock, recv_P2P_buf, sizeof(recv_P2P_buf), 0, nullptr, nullptr);
+        // int receivedBytes = recvfrom(sock, recv_P2P_buf, sizeof(recv_P2P_buf), 0, nullptr, nullptr);
+        int receivedBytes = receiveAndReconstruct(sock, recv_P2P_buf, sizeof(recv_P2P_buf));
 
         if (receivedBytes > 0)
         {
             std::string dataj(recv_P2P_buf, receivedBytes);
-            std::cout << "\nEmpfangen: " << dataj << std::endl;
+            // std::cout << "\nEmpfangen: " << dataj << std::endl;
             socket.send_to(boost::asio::buffer(dataj), remote_endpoint, 0, error);
         }
     }
@@ -380,7 +531,6 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
 
     socket.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
     socket.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
-
     int rcvbuf_size = MAX_PACKET_SIZE; // Puffergröße in Bytes
 
     if (setsockopt(sock, SOL_SOCKET, SO_RCVBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
@@ -397,13 +547,18 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
         return;
     }
 
-    /*int mtu = 1500; // Typische MTU für Ethernet-Verbindungen
+    /*
+    int mtu = MAX_PACKET_SIZE; // Typische MTU für Ethernet-Verbindungen
     if (setsockopt(sock, IPPROTO_IP, IP_MTU_DISCOVER, &mtu, sizeof(mtu)) < 0)
     {
         perror("Fehler beim Setzen der MTU-Entdeckung");
         close(sock);
         return;
-    }*/
+    }
+    */
+    // int val = IP_PMTUDISC_DO;
+    // int val = IP_PMTUDISC_DONT;
+    // setsockopt(sock, IPPROTO_IP, IP_MTU_DISCOVER, &val, sizeof(val));
 
     // Zielserveradresse vorbereiten
     struct sockaddr_in server_addr;
@@ -428,12 +583,12 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
     while (true)
     {
 
-        int receivedBytes = recvfrom(sock, recv_P2P_buf, sizeof(recv_P2P_buf), 0, nullptr, nullptr);
-
+        // int receivedBytes = recvfrom(sock, recv_P2P_buf, sizeof(recv_P2P_buf), 0, nullptr, nullptr);
+        int receivedBytes = receiveAndReconstruct(sock, recv_P2P_buf, sizeof(recv_P2P_buf));
         if (receivedBytes > 0)
         {
             std::string dataj(recv_P2P_buf, receivedBytes);
-            std::cout << "\nEmpfangen: " << dataj << std::endl;
+            // std::cout << "\nEmpfangen: " << dataj << std::endl;
             socket.send_to(boost::asio::buffer(dataj), server_endpoint, 0, error);
         }
 
@@ -441,17 +596,18 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
 
         if (!error && len > 0)
         {
-            std::cout << "Paket empfangen von: " << server_endpoint << "\n";
-            std::string data(recv_buf.begin(), recv_buf.begin() + len);
-            std::cout << "Daten: " << data << "\n";
+            // std::cout << "Paket empfangen von: " << server_endpoint << "\n";
+            // td::string data(recv_buf.begin(), recv_buf.begin() + len);
+            // std::cout << "Daten: " << data << "\n";
 
-            ssize_t sent = sendto(sock, recv_buf.data(), len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            fragmentAndSend(sock, dest_addr, recv_buf.data(), len);
+            /*ssize_t sent = sendto(sock, recv_buf.data(), len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             if (sent < 0)
             {
                 perror("Nachricht senden fehlgeschlagen");
                 close(sock);
                 exit(EXIT_FAILURE);
-            }
+            }*/
         }
     }
 }
