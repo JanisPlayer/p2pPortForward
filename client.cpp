@@ -16,6 +16,7 @@ int sock = socket(AF_INET, SOCK_DGRAM, 0);
 struct sockaddr_in dest_addr;
 
 #define MAX_PACKET_SIZE 1024
+#define MAX_RECEIVE_PACKET_SIZE 1024
 #define MAX_UDP_SIZE 1024
 
 void receiveMessages(int sockfd)
@@ -372,54 +373,127 @@ int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
 
     ssize_t received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
 
-    if (received_len > 0)
-    {
-        while (receiving)
-        {
-            // if (received_len > 0)
-            //{
-            //  Extrahiere Fragment-ID und End-Flag aus dem Header (erste 3 Bytes)
-            int fragment_id = buffer[0] | (buffer[1] << 8);
-            bool is_last_fragment = buffer[2] == 1;
+    // if (received_len > 0)
+    // {
+    //     // while (receiving)
+    //     //{
+    //     //  if (received_len > 0)
+    //     //{
+    //     //   Extrahiere Fragment-ID und End-Flag aus dem Header (erste 3 Bytes)
+    //     int fragment_id = buffer[0] | (buffer[1] << 8);
+    //     // bool is_last_fragment = buffer[2] == 1;
 
-            // Falls ein neues Datenpaket mit Fragment-ID 0 empfangen wird, starte neu
-            if (fragment_id == 0 && !fragments.empty())
-            {
-                // Daten neu anfangen zu empfangen
-                fragments.clear();
-                total_received_data = 0;
-                std::cout << "Neues Datenpaket empfangen, bestehende Fragmente verworfen." << std::endl;
-            }
+    //     // Falls ein neues Datenpaket mit Fragment-ID 0 empfangen wird, starte neu
+    //     /*if (fragment_id == 0 && !fragments.empty())
+    //     {
+    //         // Daten neu anfangen zu empfangen
+    //         fragments.clear();
+    //         total_received_data = 0;
+    //         std::cout << "Neues Datenpaket empfangen, bestehende Fragmente verworfen." << std::endl;
+    //     }*/
 
-            // Extrahiere die Daten des Fragments
-            size_t data_len = received_len - 4; // 4 Bytes für den Header
-            fragments[fragment_id] = std::vector<char>(buffer + 4, buffer + 4 + data_len);
-            total_received_data += data_len;
+    //     // Extrahiere die Daten des Fragments
+    //     size_t data_len = received_len - 4; // 4 Bytes für den Header
+    //     fragments[fragment_id] = std::vector<char>(buffer + 4, buffer + 4 + data_len);
+    //     total_received_data += data_len;
 
-            // Beenden, wenn das letzte Fragment empfangen wurde
-            if (is_last_fragment)
-            {
-                receiving = false;
-            }
-            //}
-            // received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
-        }
+    //     // Beenden, wenn das letzte Fragment empfangen wurde
+    //     /*if (is_last_fragment)
+    //     {
+    //         receiving = false;
+    //     }*/
+    //     //}
+    //     // received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
+    // }
 
-        // Rekonstruiere die vollständigen Daten aus den Fragmenten
-        std::vector<char> complete_data;
-        for (int i = 0; i < fragments.size(); ++i)
-        {
-            complete_data.insert(complete_data.end(), fragments[i].begin(), fragments[i].end());
-        }
+    // Rekonstruiere die vollständigen Daten aus den Fragmenten
+    // std::vector<char> complete_data;
+    // for (int i = 0; i < fragments.size(); ++i)
+    // {
+    //     std::cout << "fragments " << i << " num\n";
+    //     complete_data.insert(complete_data.end(), fragments[i].begin(), fragments[i].end());
+    // }
 
-        // Kopiere die rekonstruierten Daten in den bereitgestellten Puffer
-        size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
-        std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
+    // for (int i = 0; i < fragments.size(); ++i)
+    // {
+    //     if (fragments.find(i) != fragments.end())
+    //     {
+    //         complete_data.insert(complete_data.end(), fragments[i].begin(), fragments[i].end());
+    //     }
+    //     else
+    //     {
+    //         std::cerr << "Missing fragment: " << i << std::endl;
+    //         return -1; // Fehler
+    //     }
+    // }
 
-        return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
-    }
+    // Kopiere die rekonstruierten Daten in den bereitgestellten Puffer
+    size_t data_len = received_len - 4; // 4 Bytes für den Header
+    std::vector<char> complete_data;
+    fragments[0] = std::vector<char>(buffer + 4, buffer + 4 + data_len);
+    complete_data.insert(complete_data.end(), fragments[0].begin(), fragments[0].end());
+    size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
+    std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
+
+    return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
+    //}
     return 0;
 }
+
+/*
+int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size) {
+    std::unordered_map<int, std::vector<char>> fragments;
+    char buffer[MAX_UDP_SIZE + 4];
+    struct sockaddr_in from_addr;
+    socklen_t addr_len = sizeof(from_addr);
+    size_t total_received_data = 0;
+    bool is_last_fragment = false;
+
+    while (!is_last_fragment) {
+        ssize_t received_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &addr_len);
+        if (received_len < 0) {
+            perror("recvfrom failed");
+            return -1; // Fehler
+        }
+
+        // Fragment-ID und End-Flag extrahieren
+        int fragment_id = buffer[0] | (buffer[1] << 8);
+        is_last_fragment = buffer[2] == 1;
+
+        // Fragment-Daten extrahieren
+        size_t data_len = received_len - 4;
+        fragments[fragment_id] = std::vector<char>(buffer + 4, buffer + 4 + data_len);
+        total_received_data += data_len;
+
+        // Optional: Überprüfen, ob alle Fragmente empfangen wurden
+        if (is_last_fragment) {
+            size_t expected_size = 0;
+            for (const auto &fragment : fragments) {
+                expected_size += fragment.second.size();
+            }
+            if (expected_size != total_received_data) {
+                std::cerr << "Incomplete data received" << std::endl;
+                return -1; // Fehler
+            }
+        }
+    }
+
+    // Rekonstruktion
+    std::vector<char> complete_data;
+    for (int i = 0; i < fragments.size(); ++i) {
+        if (fragments.find(i) != fragments.end()) {
+            complete_data.insert(complete_data.end(), fragments[i].begin(), fragments[i].end());
+        } else {
+            std::cerr << "Missing fragment: " << i << std::endl;
+            return -1; // Fehler
+        }
+    }
+
+    size_t bytes_to_copy = std::min(complete_data.size(), buffer_size);
+    std::memcpy(recv_buffer, complete_data.data(), bytes_to_copy);
+    return static_cast<int>(bytes_to_copy);
+}
+*/
 
 /*
 int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
@@ -543,6 +617,124 @@ int receiveAndReconstruct(int sockfd, char *recv_buffer, size_t buffer_size)
     return static_cast<int>(bytes_to_copy); // Gib die Anzahl der empfangenen Bytes zurück
 }
 */
+
+udp::endpoint remote_endpoint_tmp;
+
+/*
+void handle_receive_from_socket(udp::socket &socket, sockaddr_in dest_addr)
+{
+    std::array<char, MAX_RECEIVE_PACKET_SIZE> recv_buf;
+    socket.async_receive_from(
+        boost::asio::buffer(recv_buf),
+        remote_endpoint_tmp,
+        [&, dest_addr](const boost::system::error_code &error, std::size_t len)
+        {
+            if (!error && len > 0 && dest_addr.sin_addr.s_addr != 0 && dest_addr.sin_port != 0)
+            {
+                // Paketinhalt extrahieren
+                std::string data(recv_buf.data(), len);
+
+                // Weiterleitung an die angegebene Adresse
+                sendto(sock, recv_buf.data(), len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            }
+
+            // Rekursiver Aufruf, um den Empfang fortzusetzen
+            handle_receive_from_socket(socket, dest_addr);
+        });
+}
+void handle_receive_and_send(udp::socket &socket, int sock, udp::endpoint server_endpoint)
+{
+    std::array<char, MAX_RECEIVE_PACKET_SIZE> recv_buf;
+    socket.async_receive_from(
+        boost::asio::buffer(recv_buf),
+        remote_endpoint_tmp,
+        [&, sock, server_endpoint](const boost::system::error_code &error, std::size_t len)
+        {
+            if (!error && len > 0)
+            {
+                // Empfangene Daten an Ziel weiterleiten
+                sendto(sock, recv_buf.data(), len, 0, nullptr, 0);
+
+                // Rückantwort an Remote-Endpoint
+                socket.async_send_to(
+                    boost::asio::buffer(recv_buf, len),
+                    server_endpoint,
+                    [](const boost::system::error_code &send_error, std::size_t bytes_sent)
+                    {
+                        if (send_error)
+                        {
+                            std::cerr << "Sende-Fehler: " << send_error.message() << std::endl;
+                        }
+                    });
+            }
+
+            // Rekursiver Aufruf für fortlaufenden Empfang
+            handle_receive_and_send(socket, sock, server_endpoint);
+        });
+}
+*/
+
+void handle_receive_from_socket(udp::socket &socket, sockaddr_in &dest_addr)
+{
+    std::array<char, MAX_RECEIVE_PACKET_SIZE> recv_buf;
+    // udp::endpoint remote_endpoint;
+    boost::system::error_code error;
+
+    while (true)
+    {
+        size_t len = socket.receive_from(boost::asio::buffer(recv_buf), remote_endpoint_tmp, 0, error);
+
+        if (!error && len > 0 && dest_addr.sin_addr.s_addr != 0 && dest_addr.sin_port != 0)
+        {
+            std::string data(recv_buf.data(), len);
+
+            // Paketweiterleitungslogik (hier exemplarisch)
+            // std::cout << "Fragment und senden: Größe " << len << " Bytes\n";
+            // fragmentAndSend(sock, dest_addr, recv_buf.data(), len);
+            sendto(sock, recv_buf.data(), len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        }
+    }
+}
+
+void handle_receive_and_send(udp::socket &socket, int sock, udp::endpoint server_endpoint)
+{
+    char recv_P2P_buf[MAX_RECEIVE_PACKET_SIZE];
+    // udp::endpoint remote_endpoint;
+    boost::system::error_code error;
+    remote_endpoint_tmp = server_endpoint;
+
+    while (true)
+    {
+        //int receivedBytes = receiveAndReconstruct(sock, recv_P2P_buf, sizeof(recv_P2P_buf));
+        int receivedBytes = recvfrom(sock, recv_P2P_buf, sizeof(recv_P2P_buf), 0, nullptr, nullptr);
+
+        if (receivedBytes > 0)
+        {
+            //std::string dataj(recv_P2P_buf, receivedBytes);
+            // std::cout << "Daten empfangen: " << receivedBytes << " Bytes\n";
+            //socket.send_to(boost::asio::buffer(dataj), remote_endpoint_tmp, 0, error);
+            socket.send_to(boost::asio::buffer(recv_P2P_buf, receivedBytes), remote_endpoint_tmp, 0, error);
+        }
+    }
+}
+
+/*void start_multithreaded_clients(const std::string &fake_server_ip, unsigned short port, sockaddr_in &dest_addr, int sock)
+{
+    boost::asio::io_context io_context;
+    udp::socket socket(io_context, udp::endpoint(udp::v4(), port));
+
+    socket.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
+    socket.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
+
+    // Starte die beiden Threads
+    std::thread receive_thread(handle_receive_from_socket, std::ref(socket), std::ref(dest_addr));
+    std::thread process_thread(handle_receive_and_send, std::ref(socket), sock);
+
+    // Threads laufen lassen
+    receive_thread.join();
+    process_thread.join();
+}*/
+
 void start_source_client(const std::string &fake_server_ip, unsigned short port, const std::string &network_id, const std::string &network_password, std::string &protocol)
 {
     boost::asio::io_context io_context;
@@ -561,23 +753,24 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
 
     socket.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
     socket.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
-    socket.non_blocking(true);
+    socket.non_blocking(false);
     int rcvbuf_size = MAX_PACKET_SIZE; // Puffergröße in Bytes
 
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
     {
         perror("Fehler beim Setzen der Empfangspuffergröße");
         close(sock);
         return;
     }
 
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
     {
-        perror("Fehler beim Setzen der Empfangspuffergröße");
+        perror("Fehler beim Setzen der Sendepuffergröße");
         close(sock);
         return;
     }
 
+    /*
     // Make the socket non-blocking using fcntl
     int flags = fcntl(sock, F_GETFL, 0);
     if (flags < 0)
@@ -589,6 +782,7 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
     {
         std::cerr << "Failed to set O_NONBLOCK\n";
     }
+    */
 
     /*
     int mtu = MAX_PACKET_SIZE; // Typische MTU für Ethernet-Verbindungen
@@ -611,6 +805,20 @@ void start_source_client(const std::string &fake_server_ip, unsigned short port,
     std::array<char, MAX_PACKET_SIZE> recv_buf;
     udp::endpoint remote_endpoint;
     boost::system::error_code error;
+
+    // Starte die beiden Threads
+    std::thread receive_thread(handle_receive_from_socket, std::ref(socket), std::ref(dest_addr));
+    std::thread process_thread(handle_receive_and_send, std::ref(socket), sock, remote_endpoint_tmp);
+
+    // Threads laufen lassen
+    receive_thread.join();
+    process_thread.join();
+
+    while (true)
+    {
+        sleep(1000);
+    }
+
     while (true)
     {
         size_t len = socket.receive_from(boost::asio::buffer(recv_buf), remote_endpoint, 0, error);
@@ -669,24 +877,25 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
 
     socket.set_option(boost::asio::socket_base::receive_buffer_size(MAX_PACKET_SIZE));
     socket.set_option(boost::asio::socket_base::send_buffer_size(MAX_PACKET_SIZE));
-    socket.non_blocking(true);
+    socket.non_blocking(false);
 
     int rcvbuf_size = MAX_PACKET_SIZE; // Puffergröße in Bytes
 
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
     {
         perror("Fehler beim Setzen der Empfangspuffergröße");
         close(sock);
         return;
     }
 
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
     {
-        perror("Fehler beim Setzen der Empfangspuffergröße");
+        perror("Fehler beim Setzen der Sendepuffergröße");
         close(sock);
         return;
     }
 
+    /*
     // Make the socket non-blocking using fcntl
     int flags = fcntl(sock, F_GETFL, 0);
     if (flags < 0)
@@ -698,6 +907,7 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
     {
         std::cerr << "Failed to set O_NONBLOCK\n";
     }
+    */
 
     /*
     int mtu = MAX_PACKET_SIZE; // Typische MTU für Ethernet-Verbindungen
@@ -731,6 +941,19 @@ void start_dest_client(const std::string &server_ip, unsigned short port, const 
     udp::endpoint server_endpoint(boost::asio::ip::address::from_string(server_ip), port);
     udp::endpoint remote_endpoint;
     boost::system::error_code error;
+
+    // Starte die beiden Threads
+    std::thread receive_thread(handle_receive_from_socket, std::ref(socket), std::ref(dest_addr));
+    std::thread process_thread(handle_receive_and_send, std::ref(socket), sock, server_endpoint);
+
+    // Threads laufen lassen
+    receive_thread.join();
+    process_thread.join();
+
+    while (true)
+    {
+        sleep(1000);
+    }
 
     while (true)
     {
@@ -787,20 +1010,12 @@ void start_source_client_tcp(const std::string &fake_server_ip, unsigned short p
         return;
     }
 
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
     {
-        perror("Fehler beim Setzen der Empfangspuffergröße");
+        perror("Fehler beim Setzen der Sendepuffergröße");
         close(sock);
         return;
     }
-
-    /*int mtu = 1500; // Typische MTU für Ethernet-Verbindungen
-    if (setsockopt(sock, IPPROTO_IP, IP_MTU_DISCOVER, &mtu, sizeof(mtu)) < 0)
-    {
-        perror("Fehler beim Setzen der MTU-Entdeckung");
-        close(sock);
-        return;
-    }*/
 
     std::cout << "Source client gestartet. Fake Server IP: " << fake_server_ip << " Port: " << port << "\n";
     std::cout << "Verbinden mit P2P-Netzwerk mit ID: " << network_id << " und Passwort: " << network_password << "\n";
@@ -867,16 +1082,16 @@ void start_dest_client_tcp(const std::string &server_ip, unsigned short port, co
     // socket.non_blocking(true); //async_read_some async_resolve async_connect
     int rcvbuf_size = MAX_PACKET_SIZE; // Puffergröße in Bytes
 
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
     {
         perror("Fehler beim Setzen der Empfangspuffergröße");
         close(sock);
         return;
     }
 
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUFFORCE, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0)
     {
-        perror("Fehler beim Setzen der Empfangspuffergröße");
+        perror("Fehler beim Setzen der Sendepuffergröße");
         close(sock);
         return;
     }
